@@ -8,9 +8,9 @@ use std::{
     str::FromStr,
 };
 
+use super::{volumes::AbsolutePathError, PosixAbsolutePath};
 use compose_spec_macros::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
-use super::{volumes::AbsolutePathError, PosixAbsolutePath};
 
 /// Device mapping from the host to the [`Service`](super::Service) container.
 ///
@@ -432,9 +432,9 @@ mod tests {
     use super::*;
 
     mod device {
+        use super::*;
         use crate::service::tests::path_no_colon;
         use crate::service::volumes::PosixAbsolutePath;
-        use super::*;
 
         #[test]
         fn from_str() {

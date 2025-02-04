@@ -1565,14 +1565,14 @@ impl From<VolumesFromSource> for String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use indexmap::{indexmap, indexset};
+    use proptest::prelude::prop;
     use proptest::{
         arbitrary::any,
         prop_assert_eq, prop_oneof, proptest,
         strategy::{Just, Strategy},
     };
-    use proptest::prelude::prop;
-    use super::*;
 
     /// [`Strategy`] for generating [`PathBuf`]s that do not contain colons.
     pub(super) fn path_no_colon() -> impl Strategy<Value = PathBuf> {

@@ -6,12 +6,17 @@
 
 pub mod mount;
 
-use std::{borrow::{Borrow, Cow}, fmt::{self, Display, Formatter, Write}, path::{Component, Path, PathBuf}, str::FromStr};
 use compose_spec_macros::{DeserializeFromStr, DeserializeTryFromString, SerializeDisplay};
 use indexmap::IndexSet;
 use serde::{
     de::{self, Unexpected},
     Deserialize, Deserializer, Serialize, Serializer,
+};
+use std::{
+    borrow::{Borrow, Cow},
+    fmt::{self, Display, Formatter, Write},
+    path::{Component, Path, PathBuf},
+    str::FromStr,
 };
 use thiserror::Error;
 
@@ -227,22 +232,30 @@ fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
 
     // Skip extended marker prefix if present
     // learn more in https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry
-    let n = if vol.starts_with(r"\\?\") {
-        4
-    } else {
-        0
-    };
+    let n = if vol.starts_with(r"\\?\") { 4 } else { 0 };
 
-    let options = parts.last().expect("last part to exists").split(',').collect::<Vec<_>>();
-    let has_options = options.iter().all(|option| ["ro", "rw", "z", "Z"].contains(option));
+    let options = parts
+        .last()
+        .expect("last part to exists")
+        .split(',')
+        .collect::<Vec<_>>();
+    let has_options = options
+        .iter()
+        .all(|option| ["ro", "rw", "z", "Z"].contains(option));
 
     // The minimum number of part is 2 [[SOURCE-VOLUME|HOST-DIR:]CONTAINER-DIR[:OPTIONS]]
     // the source and the container dir
     // if we have 3 part (split by ':') it can mean we either have a drive letter or no drive letter and an option
     // E.g. C:/foo:/bar is 3 parts
     // E.g. C:/foo:/bar:ro is 4 parts
-    if (has_options && parts.len() >= 4) || (!has_options && parts.len() >= 3) && has_win_drive_scheme(vol, n) {
-        let first = format!("{}:{}", parts.first().expect("element to exists"), parts.get(1).expect("element to exists"));
+    if (has_options && parts.len() >= 4)
+        || (!has_options && parts.len() >= 3) && has_win_drive_scheme(vol, n)
+    {
+        let first = format!(
+            "{}:{}",
+            parts.first().expect("element to exists"),
+            parts.get(1).expect("element to exists")
+        );
         parts.drain(0..2); // Remove the first two elements
         parts.insert(0, Box::leak(first.into_boxed_str())); // Leak to extend lifetime
     }
@@ -253,7 +266,12 @@ fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
 /// windows method to check if a given path contain a drive scheme
 #[cfg(target_os = "windows")]
 fn has_win_drive_scheme(path: &str, start: usize) -> bool {
-    if path.len() < start + 2 || !path.chars().nth(start + 1).is_some_and(|character| character == ':') {
+    if path.len() < start + 2
+        || !path
+            .chars()
+            .nth(start + 1)
+            .is_some_and(|character| character == ':')
+    {
         return false;
     }
 
@@ -560,9 +578,10 @@ impl Source {
     {
         let source_path = Path::new(source.as_ref());
 
-        let relative = source_path.components().next().is_some_and(|component| {
-            matches!(component, Component::CurDir | Component::ParentDir)
-        });
+        let relative = source_path
+            .components()
+            .next()
+            .is_some_and(|component| matches!(component, Component::CurDir | Component::ParentDir));
 
         if relative || source_path.is_absolute() {
             source.try_into().map(Self::HostPath).map_err(Into::into)
@@ -816,13 +835,12 @@ impl<'de> Deserialize<'de> for SELinux {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::prop;
     use proptest::{
         arbitrary::{any, Arbitrary},
         option, prop_assert_eq, prop_compose, prop_oneof,
         strategy::{BoxedStrategy, Just, Strategy},
     };
-    use proptest::prelude::prop;
-    
 
     use super::*;
 
@@ -836,9 +854,7 @@ mod tests {
 
         fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
             alphanumerical_string()
-                .prop_map(| content | {
-                    Self(PathBuf::from(format!("/hello/{}", content)))
-                })
+                .prop_map(|content| Self(PathBuf::from(format!("/hello/{}", content))))
                 .boxed()
         }
 
@@ -846,8 +862,8 @@ mod tests {
     }
 
     mod short_volume {
-        use proptest::proptest;
         use super::*;
+        use proptest::proptest;
 
         #[test]
         #[cfg(target_os = "windows")]
@@ -857,8 +873,14 @@ mod tests {
             assert_eq!(result.is_ok(), true);
 
             let short_volume = result.unwrap();
-            assert_eq!(short_volume.container_path, PosixAbsolutePath::new("/mnt/a").unwrap());
-            assert_eq!(short_volume.options.unwrap().source,"C:\\hello\\world".parse().unwrap());
+            assert_eq!(
+                short_volume.container_path,
+                PosixAbsolutePath::new("/mnt/a").unwrap()
+            );
+            assert_eq!(
+                short_volume.options.unwrap().source,
+                "C:\\hello\\world".parse().unwrap()
+            );
         }
 
         #[test]
@@ -869,8 +891,14 @@ mod tests {
             assert_eq!(result.is_ok(), true);
 
             let short_volume = result.unwrap();
-            assert_eq!(short_volume.container_path, PosixAbsolutePath::new("/mnt/a").unwrap());
-            assert_eq!(short_volume.options.unwrap().source,".\\hello\\world".parse().unwrap());
+            assert_eq!(
+                short_volume.container_path,
+                PosixAbsolutePath::new("/mnt/a").unwrap()
+            );
+            assert_eq!(
+                short_volume.options.unwrap().source,
+                ".\\hello\\world".parse().unwrap()
+            );
         }
 
         #[test]
@@ -881,7 +909,10 @@ mod tests {
             assert_eq!(result.is_ok(), true);
 
             let short_volume = result.unwrap();
-            assert_eq!(short_volume.options.unwrap().source,r"\\?\D:\very-long-path".parse().unwrap());
+            assert_eq!(
+                short_volume.options.unwrap().source,
+                r"\\?\D:\very-long-path".parse().unwrap()
+            );
         }
 
         #[test]
@@ -894,9 +925,7 @@ mod tests {
             let short_volume = result.unwrap();
             assert_eq!(
                 short_volume.options.unwrap().source,
-                Source::Volume(
-                    Identifier::new("a").unwrap()
-                )
+                Source::Volume(Identifier::new("a").unwrap())
             );
         }
 
@@ -921,7 +950,7 @@ mod tests {
             assert_eq!(result.is_ok(), true);
 
             let short_volume = result.unwrap();
-            assert_eq!(short_volume.options.unwrap().read_only,true);
+            assert_eq!(short_volume.options.unwrap().read_only, true);
         }
 
         #[test]
@@ -929,7 +958,10 @@ mod tests {
             // parse
             let result = ShortVolume::from_str("./hello:./world");
             assert_eq!(result.is_ok(), false);
-            assert_eq!(result.err().unwrap(), ParseShortVolumeError::AbsoluteContainerPath(String::from("./world")));
+            assert_eq!(
+                result.err().unwrap(),
+                ParseShortVolumeError::AbsoluteContainerPath(String::from("./world"))
+            );
         }
 
         #[test]
@@ -940,8 +972,14 @@ mod tests {
             assert_eq!(result.is_ok(), true);
 
             let short_volume = result.unwrap();
-            assert_eq!(short_volume.container_path, PosixAbsolutePath::new("/mnt/a").unwrap());
-            assert_eq!(short_volume.options.unwrap().source,"/hello/world".parse().unwrap());
+            assert_eq!(
+                short_volume.container_path,
+                PosixAbsolutePath::new("/mnt/a").unwrap()
+            );
+            assert_eq!(
+                short_volume.options.unwrap().source,
+                "/hello/world".parse().unwrap()
+            );
         }
 
         proptest! {
@@ -969,7 +1007,7 @@ mod tests {
         }
     }
 
-     prop_compose! {
+    prop_compose! {
         fn short_options()(
             source in source(),
             read_only: bool,
