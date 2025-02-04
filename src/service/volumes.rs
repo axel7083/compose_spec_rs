@@ -219,20 +219,22 @@ fn parse_container_path(container_path: &str) -> Result<PosixAbsolutePath, Parse
 }
 
 /// slit the volume command based on the documentation `[[SOURCE-VOLUME|HOST-DIR:]CONTAINER-DIR[:OPTIONS]]`
-/// More in https://docs.podman.io/en/v5.1.1/markdown/podman-run.1.html#volume-v-source-volume-host-dir-container-dir-options
+/// More in [podman-run#volume](https://docs.podman.io/en/v5.1.1/markdown/podman-run.1.html#volume-v-source-volume-host-dir-container-dir-options)
 /// This function is made to be cross-platform and handle windows path specific
 fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
     let mut parts = vol.split(':').collect::<Vec<_>>();
+    assert!(!parts.is_empty(), "volume path cannot be empty");
 
     // Skip extended marker prefix if present
     // learn more in https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry
-    let mut n = 0;
-    if vol.starts_with(r"\\?\") {
-        n = 4;
-    }
+    let n = if vol.starts_with(r"\\?\") {
+        4
+    } else {
+        0
+    };
 
-    let options = parts[parts.len() - 1].split(',').collect::<Vec<_>>();
-    let has_options = options.iter().all(|option| ["ro", "rw", "z", "Z"].contains(&option));
+    let options = parts.last().expect("last part to exists").split(',').collect::<Vec<_>>();
+    let has_options = options.iter().all(|option| ["ro", "rw", "z", "Z"].contains(option));
 
     // The minimum number of part is 2 [[SOURCE-VOLUME|HOST-DIR:]CONTAINER-DIR[:OPTIONS]]
     // the source and the container dir
@@ -240,7 +242,7 @@ fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
     // E.g. C:/foo:/bar is 3 parts
     // E.g. C:/foo:/bar:ro is 4 parts
     if (has_options && parts.len() >= 4) || (!has_options && parts.len() >= 3) && has_win_drive_scheme(vol, n) {
-        let first = format!("{}:{}", parts[0], parts[1]);
+        let first = format!("{}:{}", parts.first().expect("element to exists"), parts.get(1).expect("element to exists"));
         parts.drain(0..2); // Remove the first two elements
         parts.insert(0, Box::leak(first.into_boxed_str())); // Leak to extend lifetime
     }
@@ -248,14 +250,14 @@ fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
     parts.into_iter()
 }
 
-/// windows method to check if a given path contain a drive scheme (E.g. C:/hello => yes)
+/// windows method to check if a given path contain a drive scheme
 #[cfg(target_os = "windows")]
 fn has_win_drive_scheme(path: &str, start: usize) -> bool {
-    if path.len() < start + 2 || !path.chars().nth(start + 1).is_some_and(|c| c == ':') {
+    if path.len() < start + 2 || !path.chars().nth(start + 1).is_some_and(|character| character == ':') {
         return false;
     }
 
-    let drive = path.chars().nth(start).unwrap();
+    let drive = path.chars().nth(start).expect("expect character ");
     drive.is_ascii_alphabetic()
 }
 
