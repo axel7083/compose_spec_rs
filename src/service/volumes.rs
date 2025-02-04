@@ -896,7 +896,10 @@ mod tests {
                 PosixAbsolutePath::new("/mnt/a").expect("parsing without error")
             );
             assert_eq!(
-                short_volume.options.expect("parsing option without error").source,
+                short_volume
+                    .options
+                    .expect("parsing option without error")
+                    .source,
                 ".\\hello\\world".parse().expect("parsing without error")
             );
         }
@@ -911,7 +914,9 @@ mod tests {
             let short_volume = result.expect("parsing without error");
             assert_eq!(
                 short_volume.options.expect("parsing without error").source,
-                r"\\?\D:\very-long-path".parse().expect("parsing without error")
+                r"\\?\D:\very-long-path"
+                    .parse()
+                    .expect("parsing without error")
             );
         }
 
@@ -950,7 +955,12 @@ mod tests {
             assert!(result.is_ok());
 
             let short_volume = result.expect("expect parse without error");
-            assert!(short_volume.options.expect("option to be defined").read_only);
+            assert!(
+                short_volume
+                    .options
+                    .expect("option to be defined")
+                    .read_only
+            );
         }
 
         #[test]
@@ -960,7 +970,9 @@ mod tests {
             assert!(result.is_err());
             assert_eq!(
                 result.err(),
-                Some(ParseShortVolumeError::AbsoluteContainerPath(String::from("./world")))
+                Some(ParseShortVolumeError::AbsoluteContainerPath(String::from(
+                    "./world"
+                )))
             );
         }
 
