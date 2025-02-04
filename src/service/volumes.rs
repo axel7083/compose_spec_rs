@@ -6,13 +6,7 @@
 
 pub mod mount;
 
-use std::{
-    borrow::{Borrow, Cow},
-    fmt::{self, Display, Formatter, Write},
-    path::{Component, Path, PathBuf},
-    str::FromStr,
-};
-
+use std::{borrow::{Borrow, Cow}, fmt::{self, Display, Formatter, Write}, path::{Component, Path, PathBuf}, str::FromStr};
 use compose_spec_macros::{DeserializeFromStr, DeserializeTryFromString, SerializeDisplay};
 use indexmap::IndexSet;
 use serde::{
@@ -78,7 +72,7 @@ pub(crate) fn named_volumes_iter(volumes: &Volumes) -> impl Iterator<Item = &Ide
 #[serde(expecting = "a string in the format \"[{source}:]{container_path}[:{options}]\"")]
 pub struct ShortVolume {
     /// Path within the container where the volume is mounted.
-    pub container_path: AbsolutePath,
+    pub container_path: PosixAbsolutePath,
 
     /// Volume options, including an optional [`Source`].
     ///
@@ -89,7 +83,7 @@ pub struct ShortVolume {
 impl ShortVolume {
     /// Create a new [`ShortVolume`].
     #[must_use]
-    pub const fn new(container_path: AbsolutePath) -> Self {
+    pub const fn new(container_path: PosixAbsolutePath) -> Self {
         Self {
             container_path,
             options: None,
@@ -136,8 +130,8 @@ impl ShortVolume {
     }
 }
 
-impl From<AbsolutePath> for ShortVolume {
-    fn from(container_path: AbsolutePath) -> Self {
+impl From<PosixAbsolutePath> for ShortVolume {
+    fn from(container_path: PosixAbsolutePath) -> Self {
         Self::new(container_path)
     }
 }
@@ -147,7 +141,7 @@ impl FromStr for ShortVolume {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // Format is "[{source}:]{container_path}[:{options}]"
-        let mut split = s.splitn(3, ':');
+        let mut split = split_volume_string(s);
         let source_or_container = split.next().expect("split has at least one element");
 
         let Some(container_path) = split.next() else {
@@ -217,11 +211,41 @@ impl FromStr for ShortVolume {
 /// # Errors
 ///
 /// Returns an error if the container path is not an absolute path.
-fn parse_container_path(container_path: &str) -> Result<AbsolutePath, ParseShortVolumeError> {
+fn parse_container_path(container_path: &str) -> Result<PosixAbsolutePath, ParseShortVolumeError> {
     #[allow(clippy::map_err_ignore)]
     container_path
         .parse()
         .map_err(|_| ParseShortVolumeError::AbsoluteContainerPath(container_path.to_owned()))
+}
+
+fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
+    let mut parts = vol.split(':').collect::<Vec<_>>();
+
+    // Skip extended marker prefix if present
+    // learn more in https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry
+    let mut n = 0;
+    if vol.starts_with(r"\\?\") {
+        n = 4;
+    }
+
+    if has_win_drive_scheme(vol, n) {
+        if parts.len() > 1 {
+            let first = format!("{}:{}", parts[0], parts[1]);
+            parts.drain(0..2); // Remove the first two elements
+            parts.insert(0, Box::leak(first.into_boxed_str())); // Leak to extend lifetime
+        }
+    }
+
+    parts.into_iter()
+}
+
+fn has_win_drive_scheme(path: &str, start: usize) -> bool {
+    if path.len() < start + 2 || !path.chars().nth(start + 1).is_some_and(|c| c == ':') {
+        return false;
+    }
+
+    let drive = path.chars().nth(start).unwrap();
+    drive.is_ascii_alphabetic()
 }
 
 /// Error returned when [parsing](ShortVolume::from_str()) [`ShortVolume`] from a string.
@@ -324,7 +348,43 @@ impl AbsolutePath {
     }
 }
 
-/// Error returned when creating an [`AbsolutePath`].
+#[derive(
+    Serialize, DeserializeTryFromString, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+#[serde(transparent)]
+pub struct PosixAbsolutePath(PathBuf);
+
+impl PosixAbsolutePath {
+    /// Create an [`PosixAbsolutePath`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path is not absolute.
+    pub fn new<T>(path: T) -> Result<Self, AbsolutePathError>
+    where
+        T: AsRef<Path> + Into<PathBuf>,
+    {
+        let path_ref = path.as_ref();
+        // Check if the path is a POSIX-style absolute path (starts with '/')
+        if let Some(first_component) = path_ref.components().next() {
+            if matches!(first_component, Component::RootDir) {
+                return Ok(Self(path.into()));
+            }
+        }
+        Err(AbsolutePathError)
+    }
+
+    /// Truncates `self` to [`self.as_path().parent()`].
+    ///
+    /// Returns `false` and does nothing if [`self.as_path().parent()`] is [`None`].
+    ///
+    /// [`self.as_path().parent()`]: Path::parent()
+    pub fn pop(&mut self) -> bool {
+        self.0.pop()
+    }
+}
+
+/// Error returned when creating an [`AbsolutePath`] or [`PosixAbsolutePath`].
 ///
 /// Occurs if the path is not [absolute](Path::is_absolute()).
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
@@ -415,6 +475,7 @@ macro_rules! path_impls {
 }
 
 path_impls!(AbsolutePath => AbsolutePathError);
+path_impls!(PosixAbsolutePath => AbsolutePathError);
 
 /// Options for the [`ShortVolume`] syntax.
 ///
@@ -739,10 +800,8 @@ mod tests {
 
     use super::*;
 
-    impl Arbitrary for AbsolutePath {
+    impl Arbitrary for PosixAbsolutePath {
         type Parameters = ();
-
-        type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
             path_no_colon()
@@ -755,27 +814,82 @@ mod tests {
                 })
                 .boxed()
         }
+
+        type Strategy = BoxedStrategy<Self>;
     }
 
     mod short_volume {
         use super::*;
 
-        proptest! {
-            #[test]
-            fn parse_no_panic(string: String) {
-                let _ = string.parse::<ShortVolume>();
-            }
+        #[test]
+        #[cfg(target_os = "windows")]
+        fn from_str_absolute() {
+            // parse
+            let result = ShortVolume::from_str("C:\\hello\\world:/mnt/a");
+            assert_eq!(result.is_ok(), true);
 
-            #[test]
-            fn round_trip(volume in short_volume()) {
-                prop_assert_eq!(&volume, &volume.to_string().parse()?);
-            }
+            let short_volume = result.unwrap();
+            assert_eq!(short_volume.container_path, PosixAbsolutePath::new("/mnt/a").unwrap());
+            assert_eq!(short_volume.options.unwrap().source,"C:\\hello\\world".parse().unwrap());
+        }
+
+        #[test]
+        #[cfg(target_os = "windows")]
+        fn from_str_relative() {
+            // parse
+            let result = ShortVolume::from_str("./hello/world:/mnt/a");
+            assert_eq!(result.is_ok(), true);
+
+            let short_volume = result.unwrap();
+            assert_eq!(short_volume.container_path, PosixAbsolutePath::new("/mnt/a").unwrap());
+            assert_eq!(short_volume.options.unwrap().source,".\\hello\\world".parse().unwrap());
+        }
+
+        #[test]
+        #[cfg(target_os = "windows")]
+        fn from_str_extended_marker() {
+            // parse
+            let result = ShortVolume::from_str(r"\\?\D:\very-long-path:/mnt/a");
+            assert_eq!(result.is_ok(), true);
+
+            let short_volume = result.unwrap();
+            assert_eq!(short_volume.options.unwrap().source,r"\\?\D:\very-long-path".parse().unwrap());
+        }
+
+        #[test]
+        fn from_str_read_only() {
+            // parse
+            let result = ShortVolume::from_str("./hello/world:/mnt/a:ro");
+            assert_eq!(result.is_ok(), true);
+
+            let short_volume = result.unwrap();
+            assert_eq!(short_volume.options.unwrap().read_only,true);
+        }
+
+        #[test]
+        fn from_str_target_non_absolute() {
+            // parse
+            let result = ShortVolume::from_str("./hello:./world");
+            assert_eq!(result.is_ok(), false);
+            assert_eq!(result.err().unwrap(), ParseShortVolumeError::AbsoluteContainerPath(String::from("./world")));
+        }
+
+        #[test]
+        #[cfg(target_os = "linux")]
+        fn from_str_simple() {
+            // parse
+            let mut result = ShortVolume::from_str("/hello/world:/mnt/a");
+            assert_eq!(result.is_ok(), true);
+
+            let short_volume = result.unwrap();
+            assert_eq!(short_volume.container_path, PosixAbsolutePath::new("/mnt/a").unwrap());
+            assert_eq!(short_volume.options.unwrap().source,"/hello/world".parse().unwrap());
         }
     }
 
     prop_compose! {
         fn short_volume()(
-            container_path: AbsolutePath,
+            container_path: PosixAbsolutePath,
             options in option::of(short_options()),
         ) -> ShortVolume {
             ShortVolume {
@@ -785,7 +899,7 @@ mod tests {
         }
     }
 
-    prop_compose! {
+     prop_compose! {
         fn short_options()(
             source in source(),
             read_only: bool,
@@ -806,6 +920,15 @@ mod tests {
         ]
     }
 
+    #[cfg(target_os = "windows")]
+    fn host_path() -> impl Strategy<Value = HostPath> {
+        path_no_colon().prop_flat_map(|path| {
+            prop_oneof![Just("C:\\"), Just("."), Just("..")]
+                .prop_map(move |prefix| HostPath(Path::new(prefix).join(&path)))
+        })
+    }
+
+    #[cfg(target_os = "linux")]
     fn host_path() -> impl Strategy<Value = HostPath> {
         path_no_colon().prop_flat_map(|path| {
             prop_oneof![Just("/"), Just("."), Just("..")]

@@ -10,8 +10,7 @@ use std::{
 
 use compose_spec_macros::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
-
-use super::{volumes::AbsolutePathError, AbsolutePath};
+use super::{volumes::AbsolutePathError, PosixAbsolutePath};
 
 /// Device mapping from the host to the [`Service`](super::Service) container.
 ///
@@ -25,7 +24,7 @@ pub struct Device {
     pub host_path: PathBuf,
 
     /// Path inside the container to bind mount the device to.
-    pub container_path: AbsolutePath,
+    pub container_path: PosixAbsolutePath,
 
     /// Device cgroup permissions.
     pub permissions: Permissions,
@@ -434,7 +433,7 @@ mod tests {
 
     mod device {
         use crate::service::tests::path_no_colon;
-
+        use crate::service::volumes::PosixAbsolutePath;
         use super::*;
 
         #[test]
@@ -485,7 +484,7 @@ mod tests {
         prop_compose! {
             fn device()(
                 host_path in path_no_colon(),
-                container_path: AbsolutePath,
+                container_path: PosixAbsolutePath,
                 permissions in permissions()
             ) -> Device {
                 Device { host_path, container_path, permissions }
