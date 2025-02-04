@@ -846,7 +846,7 @@ mod tests {
 
     /// [`Strategy`] for generating [`String`]
     pub(super) fn alphanumerical_string() -> impl Strategy<Value = String> {
-        prop::string::string_regex(r"[a-zA-Z0-9][a-zA-Z0-9._-]*").unwrap()
+        prop::string::string_regex("[a-zA-Z0-9][a-zA-Z0-9._-]*").expect("valid regex")
     }
 
     impl Arbitrary for PosixAbsolutePath {
@@ -854,7 +854,7 @@ mod tests {
 
         fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
             alphanumerical_string()
-                .prop_map(|content| Self(PathBuf::from(format!("/hello/{}", content))))
+                .prop_map(|content| Self(PathBuf::from(format!("/hello/{content}"))))
                 .boxed()
         }
 
@@ -870,16 +870,16 @@ mod tests {
         fn from_str_absolute() {
             // parse
             let result = ShortVolume::from_str("C:\\hello\\world:/mnt/a");
-            assert_eq!(result.is_ok(), true);
+            assert!(result.is_ok());
 
-            let short_volume = result.unwrap();
+            let short_volume = result.expect("expect parse without error");
             assert_eq!(
                 short_volume.container_path,
-                PosixAbsolutePath::new("/mnt/a").unwrap()
+                PosixAbsolutePath::new("/mnt/a").expect("parsing without error")
             );
             assert_eq!(
-                short_volume.options.unwrap().source,
-                "C:\\hello\\world".parse().unwrap()
+                short_volume.options.expect("parsing without error").source,
+                "C:\\hello\\world".parse().expect("parsing without error")
             );
         }
 
@@ -888,16 +888,16 @@ mod tests {
         fn from_str_relative() {
             // parse
             let result = ShortVolume::from_str("./hello/world:/mnt/a");
-            assert_eq!(result.is_ok(), true);
+            assert!(result.is_ok());
 
-            let short_volume = result.unwrap();
+            let short_volume = result.expect("parsing without error");
             assert_eq!(
                 short_volume.container_path,
-                PosixAbsolutePath::new("/mnt/a").unwrap()
+                PosixAbsolutePath::new("/mnt/a").expect("parsing without error")
             );
             assert_eq!(
-                short_volume.options.unwrap().source,
-                ".\\hello\\world".parse().unwrap()
+                short_volume.options.expect("parsing option without error").source,
+                ".\\hello\\world".parse().expect("parsing without error")
             );
         }
 
@@ -906,12 +906,12 @@ mod tests {
         fn from_str_extended_marker() {
             // parse
             let result = ShortVolume::from_str(r"\\?\D:\very-long-path:/mnt/a");
-            assert_eq!(result.is_ok(), true);
+            assert!(result.is_ok());
 
-            let short_volume = result.unwrap();
+            let short_volume = result.expect("parsing without error");
             assert_eq!(
-                short_volume.options.unwrap().source,
-                r"\\?\D:\very-long-path".parse().unwrap()
+                short_volume.options.expect("parsing without error").source,
+                r"\\?\D:\very-long-path".parse().expect("parsing without error")
             );
         }
 
@@ -920,12 +920,12 @@ mod tests {
         fn single_character_volume_name() {
             // parse
             let result = ShortVolume::from_str("a:/mnt/a");
-            assert_eq!(result.is_ok(), true);
+            assert!(result.is_ok());
 
-            let short_volume = result.unwrap();
+            let short_volume = result.expect("parsing without error");
             assert_eq!(
-                short_volume.options.unwrap().source,
-                Source::Volume(Identifier::new("a").unwrap())
+                short_volume.options.expect("parsing without error").source,
+                Source::Volume(Identifier::new("a").expect("parsing without error"))
             );
         }
 
@@ -934,12 +934,12 @@ mod tests {
         fn current_dir() {
             // parse
             let result = ShortVolume::from_str(".\\:/mnt/a");
-            assert_eq!(result.is_ok(), true);
+            assert!(result.is_ok());
 
-            let short_volume = result.unwrap();
+            let short_volume = result.expect("parsing without error");
             assert_eq!(
-                short_volume.options.unwrap().source,
-                Source::HostPath(HostPath::new(".\\").unwrap())
+                short_volume.options.expect("parsing option").source,
+                Source::HostPath(HostPath::new(".\\").expect("parsing without error"))
             );
         }
 
@@ -947,20 +947,20 @@ mod tests {
         fn from_str_read_only() {
             // parse
             let result = ShortVolume::from_str("./hello/world:/mnt/a:ro");
-            assert_eq!(result.is_ok(), true);
+            assert!(result.is_ok());
 
-            let short_volume = result.unwrap();
-            assert_eq!(short_volume.options.unwrap().read_only, true);
+            let short_volume = result.expect("expect parse without error");
+            assert!(short_volume.options.expect("option to be defined").read_only);
         }
 
         #[test]
         fn from_str_target_non_absolute() {
             // parse
             let result = ShortVolume::from_str("./hello:./world");
-            assert_eq!(result.is_ok(), false);
+            assert!(result.is_err());
             assert_eq!(
-                result.err().unwrap(),
-                ParseShortVolumeError::AbsoluteContainerPath(String::from("./world"))
+                result.err(),
+                Some(ParseShortVolumeError::AbsoluteContainerPath(String::from("./world")))
             );
         }
 
