@@ -1038,7 +1038,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     fn host_path() -> impl Strategy<Value = HostPath> {
-        path_no_colon().prop_flat_map(|path| {
+        alphanumerical_string().prop_flat_map(|path| {
             prop_oneof![Just("/"), Just("."), Just("..")]
                 .prop_map(move |prefix| HostPath(Path::new(prefix).join(&path)))
         })
