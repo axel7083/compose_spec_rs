@@ -348,6 +348,7 @@ impl AbsolutePath {
     }
 }
 
+/// An absolute posix path
 #[derive(
     Serialize, DeserializeTryFromString, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
