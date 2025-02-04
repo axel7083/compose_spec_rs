@@ -1028,18 +1028,9 @@ mod tests {
         ]
     }
 
-    #[cfg(target_os = "windows")]
     fn host_path() -> impl Strategy<Value = HostPath> {
         alphanumerical_string().prop_flat_map(|path| {
             prop_oneof![Just("."), Just("..")]
-                .prop_map(move |prefix| HostPath(Path::new(prefix).join(&path)))
-        })
-    }
-
-    #[cfg(target_os = "linux")]
-    fn host_path() -> impl Strategy<Value = HostPath> {
-        alphanumerical_string().prop_flat_map(|path| {
-            prop_oneof![Just("/"), Just("."), Just("..")]
                 .prop_map(move |prefix| HostPath(Path::new(prefix).join(&path)))
         })
     }
