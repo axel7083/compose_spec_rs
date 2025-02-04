@@ -818,11 +818,11 @@ impl<'de> Deserialize<'de> for SELinux {
 mod tests {
     use proptest::{
         arbitrary::{any, Arbitrary},
-        option, prop_assert_eq, prop_compose, prop_oneof, proptest,
+        option, prop_assert_eq, prop_compose, prop_oneof,
         strategy::{BoxedStrategy, Just, Strategy},
     };
     use proptest::prelude::prop;
-    use crate::service::tests::path_no_colon;
+    
 
     use super::*;
 

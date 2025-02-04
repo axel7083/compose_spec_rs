@@ -1567,8 +1567,7 @@ impl From<VolumesFromSource> for String {
 mod tests {
     use indexmap::{indexmap, indexset};
     use proptest::{
-        arbitrary::{any, Arbitrary},
-        path::PathParams,
+        arbitrary::any,
         prop_assert_eq, prop_oneof, proptest,
         strategy::{Just, Strategy},
     };
