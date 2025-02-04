@@ -228,12 +228,18 @@ fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
         n = 4;
     }
 
-    if has_win_drive_scheme(vol, n) {
-        if parts.len() > 1 {
-            let first = format!("{}:{}", parts[0], parts[1]);
-            parts.drain(0..2); // Remove the first two elements
-            parts.insert(0, Box::leak(first.into_boxed_str())); // Leak to extend lifetime
-        }
+    let options = parts[parts.len() - 1].split(',').collect::<Vec<_>>();
+    let has_options = options.iter().all(|option| ["ro", "rw", "z", "Z"].contains(&option));
+
+    // The minimum number of part is 2 [[SOURCE-VOLUME|HOST-DIR:]CONTAINER-DIR[:OPTIONS]]
+    // the source and the container dir
+    // if we have 3 part (split by ':') it can mean we either have a drive letter or no drive letter and an option
+    // E.g. C:/foo:/bar is 3 parts
+    // E.g. C:/foo:/bar:ro is 4 parts
+    if (has_options && parts.len() >= 4) || (!has_options && parts.len() >= 3) && has_win_drive_scheme(vol, n) {
+        let first = format!("{}:{}", parts[0], parts[1]);
+        parts.drain(0..2); // Remove the first two elements
+        parts.insert(0, Box::leak(first.into_boxed_str())); // Leak to extend lifetime
     }
 
     parts.into_iter()
@@ -539,7 +545,13 @@ impl Source {
         <T as TryInto<HostPath>>::Error: Into<ParseSourceError>,
         <T as TryInto<Identifier>>::Error: Into<ParseSourceError>,
     {
-        if source.as_ref().starts_with('.') || Path::new(source.as_ref()).is_absolute() {
+        let source_path = Path::new(source.as_ref());
+
+        let relative = source_path.components().next().is_some_and(|component| {
+            matches!(component, Component::CurDir | Component::ParentDir)
+        });
+
+        if relative || source_path.is_absolute() {
             source.try_into().map(Self::HostPath).map_err(Into::into)
         } else {
             source.try_into().map(Self::Volume).map_err(Into::into)
@@ -793,25 +805,26 @@ impl<'de> Deserialize<'de> for SELinux {
 mod tests {
     use proptest::{
         arbitrary::{any, Arbitrary},
-        option, prop_compose, prop_oneof,
+        option, prop_assert_eq, prop_compose, prop_oneof, proptest,
         strategy::{BoxedStrategy, Just, Strategy},
     };
-
+    use proptest::prelude::prop;
     use crate::service::tests::path_no_colon;
 
     use super::*;
+
+    /// [`Strategy`] for generating [`String`]
+    pub(super) fn alphanumerical_string() -> impl Strategy<Value = String> {
+        prop::string::string_regex(r"[a-zA-Z0-9][a-zA-Z0-9._-]*").unwrap()
+    }
 
     impl Arbitrary for PosixAbsolutePath {
         type Parameters = ();
 
         fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
-            path_no_colon()
-                .prop_map(|path| {
-                    if path.is_absolute() {
-                        Self(path)
-                    } else {
-                        Self(Path::new("/").join(path))
-                    }
+            alphanumerical_string()
+                .prop_map(| content | {
+                    Self(PathBuf::from(format!("/hello/{}", content)))
                 })
                 .boxed()
         }
@@ -820,6 +833,7 @@ mod tests {
     }
 
     mod short_volume {
+        use proptest::proptest;
         use super::*;
 
         #[test]
@@ -858,6 +872,36 @@ mod tests {
         }
 
         #[test]
+        #[cfg(target_os = "windows")]
+        fn single_character_volume_name() {
+            // parse
+            let result = ShortVolume::from_str("a:/mnt/a");
+            assert_eq!(result.is_ok(), true);
+
+            let short_volume = result.unwrap();
+            assert_eq!(
+                short_volume.options.unwrap().source,
+                Source::Volume(
+                    Identifier::new("a").unwrap()
+                )
+            );
+        }
+
+        #[test]
+        #[cfg(target_os = "windows")]
+        fn current_dir() {
+            // parse
+            let result = ShortVolume::from_str(".\\:/mnt/a");
+            assert_eq!(result.is_ok(), true);
+
+            let short_volume = result.unwrap();
+            assert_eq!(
+                short_volume.options.unwrap().source,
+                Source::HostPath(HostPath::new(".\\").unwrap())
+            );
+        }
+
+        #[test]
         fn from_str_read_only() {
             // parse
             let result = ShortVolume::from_str("./hello/world:/mnt/a:ro");
@@ -885,6 +929,18 @@ mod tests {
             let short_volume = result.unwrap();
             assert_eq!(short_volume.container_path, PosixAbsolutePath::new("/mnt/a").unwrap());
             assert_eq!(short_volume.options.unwrap().source,"/hello/world".parse().unwrap());
+        }
+
+        proptest! {
+            #[test]
+            fn parse_no_panic(string: String) {
+                let _ = string.parse::<ShortVolume>();
+            }
+
+            #[test]
+            fn round_trip(volume in short_volume()) {
+                prop_assert_eq!(&volume, &volume.to_string().parse()?);
+            }
         }
     }
 
@@ -923,8 +979,8 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     fn host_path() -> impl Strategy<Value = HostPath> {
-        path_no_colon().prop_flat_map(|path| {
-            prop_oneof![Just("C:\\"), Just("."), Just("..")]
+        alphanumerical_string().prop_flat_map(|path| {
+            prop_oneof![Just("."), Just("..")]
                 .prop_map(move |prefix| HostPath(Path::new(prefix).join(&path)))
         })
     }

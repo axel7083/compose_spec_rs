@@ -1572,12 +1572,13 @@ mod tests {
         prop_assert_eq, prop_oneof, proptest,
         strategy::{Just, Strategy},
     };
-
+    use proptest::prelude::prop;
     use super::*;
 
     /// [`Strategy`] for generating [`PathBuf`]s that do not contain colons.
     pub(super) fn path_no_colon() -> impl Strategy<Value = PathBuf> {
-        PathBuf::arbitrary_with(PathParams::default().with_component_regex("[^:]*"))
+        prop::collection::vec("[^:/]+", 1..5) // Generate path components
+            .prop_map(|components| PathBuf::from(components.join("/"))) // Join with "/"
     }
 
     mod volumes_from {
