@@ -218,6 +218,9 @@ fn parse_container_path(container_path: &str) -> Result<PosixAbsolutePath, Parse
         .map_err(|_| ParseShortVolumeError::AbsoluteContainerPath(container_path.to_owned()))
 }
 
+/// slit the volume command based on the documentation `[[SOURCE-VOLUME|HOST-DIR:]CONTAINER-DIR[:OPTIONS]]`
+/// More in https://docs.podman.io/en/v5.1.1/markdown/podman-run.1.html#volume-v-source-volume-host-dir-container-dir-options
+/// This function is made to be cross-platform and handle windows path specific
 fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
     let mut parts = vol.split(':').collect::<Vec<_>>();
 
@@ -245,6 +248,8 @@ fn split_volume_string(vol: &str) -> impl Iterator<Item = &str> {
     parts.into_iter()
 }
 
+/// windows method to check if a given path contain a drive scheme (E.g. C:/hello => yes)
+#[cfg(target_os = "windows")]
 fn has_win_drive_scheme(path: &str, start: usize) -> bool {
     if path.len() < start + 2 || !path.chars().nth(start + 1).is_some_and(|c| c == ':') {
         return false;
@@ -252,6 +257,12 @@ fn has_win_drive_scheme(path: &str, start: usize) -> bool {
 
     let drive = path.chars().nth(start).unwrap();
     drive.is_ascii_alphabetic()
+}
+
+/// Non-Windows implementation (always returns false)
+#[cfg(not(target_os = "windows"))]
+fn has_win_drive_scheme(path: &str, start: usize) -> bool {
+    false
 }
 
 /// Error returned when [parsing](ShortVolume::from_str()) [`ShortVolume`] from a string.
